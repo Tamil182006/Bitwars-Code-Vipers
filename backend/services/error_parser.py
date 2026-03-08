@@ -127,3 +127,57 @@ def parse_stack_trace(error_text: str) -> dict:
         result["search_query"] = " ".join(query_parts)
 
     return result
+
+
+def extract_variable_names(error_info: dict) -> List[str]:
+    """
+    Given the parsed error_info dict, extracts likely variable / identifier names
+    that the Trace RAG second-pass search should hunt for.
+
+    Handles patterns like:
+      - "Cannot read properties of undefined (reading 'user')"  → ['user']
+      - "undefined is not an object (evaluating 'user.id')"     → ['user']
+      - "name 'user_id' is not defined"                         → ['user_id']
+      - "AttributeError: 'NoneType' object has no attribute 'email'" → ['email']
+      - "KeyError: 'session_token'"                              → ['session_token']
+      - "NameError: name 'db' is not defined"                   → ['db']
+    Returns a deduplicated list of clean identifier names (no dots, no quotes).
+    """
+    variables: List[str] = []
+    msg = (error_info.get("error_message") or "") + " " + (error_info.get("error_type") or "")
+
+    # -- Pattern 1: JS "reading 'varName'" --
+    js_reading = re.findall(r"reading ['\"]([a-zA-Z_$][\w$]*)['\"]", msg)
+    variables.extend(js_reading)
+
+    # -- Pattern 2: JS "evaluating 'obj.prop'" → take first part before dot --
+    js_eval = re.findall(r"evaluating ['\"]([a-zA-Z_$][\w$]*)(?:\.[\w$]+)*['\"]", msg)
+    variables.extend(js_eval)
+
+    # -- Pattern 3: Python "name 'varName' is not defined" --
+    py_name = re.findall(r"name ['\"]([a-zA-Z_]\w*)['\"] is not defined", msg)
+    variables.extend(py_name)
+
+    # -- Pattern 4: Python "has no attribute 'attrName'" --
+    py_attr = re.findall(r"has no attribute ['\"]([a-zA-Z_]\w*)['\"]", msg)
+    variables.extend(py_attr)
+
+    # -- Pattern 5: Python/generic "KeyError: 'keyName'" --
+    key_error = re.findall(r"KeyError:\s*['\"]([a-zA-Z_]\w*)['\"]", msg)
+    variables.extend(key_error)
+
+    # -- Pattern 6: Python "NameError ... 'varName'" --
+    name_error = re.findall(r"NameError.*?['\"]([a-zA-Z_]\w*)['\"]", msg)
+    variables.extend(name_error)
+
+    # Deduplicate while preserving order, skip generic noise words
+    NOISE = {"undefined", "null", "None", "true", "false", "error", "Error"}
+    seen = set()
+    result = []
+    for v in variables:
+        if v not in seen and v not in NOISE and len(v) > 1:
+            seen.add(v)
+            result.append(v)
+
+    return result
+

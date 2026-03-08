@@ -10,6 +10,7 @@ import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useAuth } from "@/contexts/AuthContext";
+import { globalStore } from "@/lib/store";
 
 const API = "http://localhost:8000";
 
@@ -28,8 +29,8 @@ type ErrorSession = {
 };
 
 export default function ErrorsPage() {
-  const [sessions, setSessions] = useState<ErrorSession[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<ErrorSession[]>(globalStore.errorSessions || []);
+  const [activeId, setActiveId] = useState<string | null>(globalStore.errorActiveId || null);
   const [errorInput, setErrorInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -50,6 +51,17 @@ export default function ErrorsPage() {
     }
   }, [user, isLoading, router]);
 
+  // Persist to global store on change
+  useEffect(() => {
+    globalStore.errorSessions = sessions;
+    globalStore.errorActiveId = activeId;
+  }, [sessions, activeId]);
+
+  // Auto-scroll chat (must be before conditional returns)
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [activeSession?.messages, activeSession?.status]);
+
   // Show loading while checking auth
   if (isLoading) {
     return (
@@ -63,11 +75,6 @@ export default function ErrorsPage() {
   if (!user) {
     return null;
   }
-
-  // Auto-scroll chat
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeSession?.messages, activeSession?.status]);
 
   const handleNewSession = () => {
     setActiveId(null);
@@ -138,6 +145,9 @@ export default function ErrorsPage() {
                 <div className="font-mono text-xs text-white/60">Message: {data.error_info.error_message || "No specific message extracted"}</div>
                 {data.error_info.files_mentioned?.length > 0 && (
                   <div className="font-mono text-xs text-white/50 mt-1">Files found: {data.error_info.files_mentioned.join(", ")}</div>
+                )}
+                {data.error_info.variables_traced?.length > 0 && (
+                  <div className="font-mono text-xs text-orange-400/70 mt-1">🔍 Variables traced: {data.error_info.variables_traced.join(", ")}</div>
                 )}
               </div>
             )}

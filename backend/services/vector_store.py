@@ -3,7 +3,7 @@ import uuid
 from typing import List
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 from sentence_transformers import SentenceTransformer
 
 load_dotenv()
@@ -97,20 +97,6 @@ def build_index(chunks: List[dict], user_id: int, repo_id: int) -> None:
             )
         )
 
-    # Upload in batches of 100 to avoid timeout
-    batch_size = 100
-    for i in range(0, len(points), batch_size):
-        batch = points[i : i + batch_size]
-        client.upsert(collection_name=COLLECTION_NAME, points=batch)
-
-    print(f"[VectorStore] Uploaded {len(points)} vectors to Qdrant ✅")
-
-    # Upload in batches of 100 to avoid timeout
-    batch_size = 100
-    for i in range(0, len(points), batch_size):
-        batch = points[i : i + batch_size]
-        client.upsert(collection_name=COLLECTION_NAME, points=batch)
-
     print(f"[VectorStore] Uploaded {len(points)} vectors to Qdrant ✅")
 
 
@@ -128,20 +114,19 @@ def search(query: str, user_id: int, repo_id: int, top_k: int = 5) -> List[dict]
 
     query_embedding = model.encode([query])[0].tolist()
 
-    # Filter by user_id and repo_id
-    filter_conditions = {
-        "must": [
-            {"key": "user_id", "match": {"value": user_id}},
-            {"key": "repo_id", "match": {"value": repo_id}}
+    # Use proper Qdrant Filter objects (compatible with all qdrant-client versions)
+    qfilter = Filter(
+        must=[
+            FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+            FieldCondition(key="repo_id", match=MatchValue(value=repo_id)),
         ]
-    }
+    )
 
-    # query_points() is the new API in qdrant-client >= 1.7
     response = client.query_points(
         collection_name=COLLECTION_NAME,
         query=query_embedding,
         limit=top_k,
-        filter=filter_conditions,
+        query_filter=qfilter,
         with_payload=True,
     )
 
@@ -164,15 +149,42 @@ def search(query: str, user_id: int, repo_id: int, top_k: int = 5) -> List[dict]
 def index_exists() -> bool:
     """
     Returns True if the Qdrant collection exists and has at least 1 vector.
-    Checks directly — no in-memory flags that can get reset.
     """
     try:
         client = get_client()
         existing = [c.name for c in client.get_collections().collections]
         if COLLECTION_NAME not in existing:
             return False
-        # Directly count points — works for both cloud and in-memory Qdrant
         count_result = client.count(collection_name=COLLECTION_NAME)
         return count_result.count > 0
     except Exception:
         return False
+
+
+# ── Scroll all chunks for a user+repo (for health dashboard) ──────────
+
+def scroll_all_chunks(user_id: int, repo_id: int, limit: int = 500) -> List[dict]:
+    """
+    Fetches all stored chunk payloads for a given user and repo from Qdrant.
+    Used by the /api/repo/health endpoint to compute dashboard stats.
+    """
+    try:
+        client = get_client()
+        qfilter = Filter(
+            must=[
+                FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+                FieldCondition(key="repo_id", match=MatchValue(value=repo_id)),
+            ]
+        )
+        results, _ = client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=qfilter,
+            limit=limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        return [point.payload for point in results if point.payload]
+    except Exception as e:
+        print(f"[VectorStore] scroll_all_chunks failed: {e}")
+        return []
+

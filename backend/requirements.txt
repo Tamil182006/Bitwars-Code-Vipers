@@ -6,7 +6,7 @@ sentence-transformers
 qdrant-client
 openai
 requests
-google-generativeai
+google-genai
 sqlmodel
 alembic
 psycopg2-binary

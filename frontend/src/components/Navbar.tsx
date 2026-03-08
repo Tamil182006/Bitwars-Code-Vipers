@@ -92,13 +92,18 @@ export default function Navbar() {
 
             {!isLoading && (
               user ? (
-                <button
-                  onClick={handleLogout}
-                  className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium text-white/50 hover:text-red-400 hover:bg-red-400/10 border border-transparent hover:border-red-400/20 transition-all duration-300 group"
-                >
-                  <LogOut size={16} className="group-hover:translate-x-0.5 transition-transform" />
-                  <span>Logout</span>
-                </button>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-mono text-white/40 border border-white/10 px-3 py-1.5 rounded-full">
+                    👤 {user.username}
+                  </span>
+                  <button
+                    onClick={handleLogout}
+                    className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium text-white/50 hover:text-red-400 hover:bg-red-400/10 border border-transparent hover:border-red-400/20 transition-all duration-300 group"
+                  >
+                    <LogOut size={16} className="group-hover:translate-x-0.5 transition-transform" />
+                    <span>Logout</span>
+                  </button>
+                </div>
               ) : (
                 <Link
                   href="/login"

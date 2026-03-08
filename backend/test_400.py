@@ -1,0 +1,23 @@
+import sys
+import os
+import requests
+from dotenv import load_dotenv
+
+load_dotenv()
+
+api_key = os.getenv("OPENROUTER_API_KEY")
+
+payload = {
+    "model": "google/gemma-3-27b-it:free",
+    "messages": [
+        {"role": "user", "content": "hi"}
+    ]
+}
+headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json"
+}
+
+resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
+print(resp.status_code)
+print(resp.text)

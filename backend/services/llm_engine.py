@@ -2,7 +2,8 @@ import os
 import time
 import random
 import requests
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from typing import List
 from dotenv import load_dotenv
 
@@ -10,12 +11,12 @@ load_dotenv()
 
 # ── Constants ──────────────────────────────────────────────────────────
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+GEMINI_MODEL   = "gemini-2.5-flash"
 
 # Multiple free models as fallbacks — if one is rate limited, tries the next
 FREE_MODELS = [
-    "qwen/qwen3-coder:free",
-    "google/gemma-2-9b-it:free",
-    "mistralai/mistral-7b-instruct:free",
+    "qwen/qwen-2.5-coder-32b-instruct:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
 ]
 
 
@@ -37,15 +38,13 @@ def call_llm(prompt: str, model_index: int = 0, retries: int = 3) -> str:
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:5173",
-        "X-Title": "DevGuardian",
     }
 
     payload = {
         "model": current_model,
         "messages": [
             {"role": "system", "content": "You are DevGuardian, an expert AI debugging and code assistant. Be concise and helpful."},
-            {"role": "user", "content": prompt[:6000]},  # Cap prompt size
+            {"role": "user", "content": prompt[:6000]},
         ],
         "max_tokens": 800,
         "temperature": 0.3,
@@ -56,7 +55,6 @@ def call_llm(prompt: str, model_index: int = 0, retries: int = 3) -> str:
             resp = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=45)
 
             if resp.status_code == 429:
-                # Rate limited — wait with exponential backoff then try next model
                 wait_time = min(60, (2 ** attempt) * 3 + random.uniform(0, 3))
                 print(f"[LLM] Rate limit on {current_model}. Waiting {wait_time:.1f}s then trying next model...")
                 time.sleep(wait_time)
@@ -79,6 +77,47 @@ def call_llm(prompt: str, model_index: int = 0, retries: int = 3) -> str:
     return "AI explanation unavailable after all retries."
 
 
+def call_llm_with_history(system_prompt: str, history: list, user_message: str, model_index: int = 0) -> str:
+    """
+    Sends a multi-turn conversation to OpenRouter with prior chat history.
+    history: list of {"role": "user"|"assistant", "content": "..."} dicts
+    """
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY not set in .env file")
+
+    current_model = FREE_MODELS[model_index % len(FREE_MODELS)]
+    print(f"[LLM] Multi-turn using model: {current_model}")
+
+    # Build messages: system + history + current message
+    messages = [{"role": "system", "content": system_prompt}]
+    for msg in history[-6:]:  # last 6 turns max to keep tokens low
+        role = msg.get("role", "user")
+        if role == "assistant":
+            role = "assistant"
+        messages.append({"role": role, "content": str(msg.get("content", ""))[:2000]})
+    messages.append({"role": "user", "content": user_message[:4000]})
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": current_model,
+        "messages": messages,
+        "max_tokens": 1000,
+        "temperature": 0.3,
+    }
+    try:
+        resp = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=45)
+        if resp.status_code == 429:
+            return call_llm_with_history(system_prompt, history, user_message, model_index + 1)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f"AI response unavailable: {str(e)}"
+
+
 # ── Helper: build code context string ─────────────────────────────────
 
 def build_context(chunks: List[dict]) -> str:
@@ -98,19 +137,51 @@ def build_context(chunks: List[dict]) -> str:
     return "\n\n".join(parts)
 
 
-# ── Gemini caller ─────────────────────────────────────────────────────
+# ── Gemini helpers ─────────────────────────────────────────────────────
 
-def call_gemini(prompt: str) -> str:
-    """
-    Sends a prompt to Google Gemini Pro.
-    Used for the explanation and query answer steps.
-    """
+def _get_gemini_client() -> genai.Client:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY not set in .env file")
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    response = model.generate_content(prompt)
+    return genai.Client(api_key=api_key)
+
+
+def call_gemini(prompt: str) -> str:
+    """
+    Sends a single prompt to Google Gemini (new google-genai SDK).
+    """
+    client = _get_gemini_client()
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=prompt,
+    )
+    return response.text
+
+
+def call_gemini_with_history(system_prompt: str, history: list, user_message: str) -> str:
+    """
+    Sends a multi-turn conversation to Gemini so it remembers prior context.
+    history: list of {"role": "user"|"assistant", "content": "..."} dicts
+    """
+    client = _get_gemini_client()
+
+    # Build Gemini history format
+    gemini_history = []
+    for msg in history:
+        role = "user" if msg.get("role") == "user" else "model"
+        gemini_history.append(
+            types.Content(
+                role=role,
+                parts=[types.Part.from_text(text=msg.get("content", ""))],
+            )
+        )
+
+    chat = client.chats.create(
+        model=GEMINI_MODEL,
+        config=types.GenerateContentConfig(system_instruction=system_prompt),
+        history=gemini_history,
+    )
+    response = chat.send_message(user_message)
     return response.text
 
 
@@ -139,16 +210,24 @@ def explain_error(error_info: dict, relevant_chunks: List[dict]) -> str:
 
 # ── Function 2: Answer a codebase query ────────────────────────────────
 
-def answer_query(question: str, relevant_chunks: List[dict]) -> str:
-    """Answers a natural language question about the codebase using Gemini."""
+def answer_query(question: str, relevant_chunks: List[dict], history: list = None) -> str:
+    """Answers a natural language codebase question using OpenRouter (saves Gemini quota)."""
     context = build_context(relevant_chunks)
 
-    prompt = (
-        f"You are DevGuardian, an AI code assistant.\n\n"
-        f"A developer asked this question about their codebase:\n\n"
-        f"Question: {question}\n\n"
-        f"Relevant Code from Repository:\n{context}\n\n"
-        f"Answer clearly, referencing specific files and functions. Use markdown."
+    system_prompt = (
+        "You are DevGuardian, an expert AI code assistant. "
+        "You help developers understand their codebase by referencing specific files and functions. "
+        "Always use markdown in your responses. Be concise and accurate."
     )
 
-    return call_gemini(prompt)
+    user_message = (
+        f"Question: {question}\n\n"
+        f"Relevant Code from Repository:\n{context}\n\n"
+        f"Answer clearly, referencing specific files and functions."
+    )
+
+    if history:
+        return call_gemini_with_history(system_prompt, history, user_message)
+    else:
+        prompt = f"{system_prompt}\n\n{user_message}"
+        return call_gemini(prompt)

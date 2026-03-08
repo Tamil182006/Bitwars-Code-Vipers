@@ -25,39 +25,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        // Check for stored token on mount
+        // Check for stored token on mount and restore user session
         const storedToken = localStorage.getItem('auth_token');
         if (storedToken) {
             setToken(storedToken);
-            // TODO: Validate token with backend and set user
+            // Validate token and restore user
+            fetch('http://localhost:8000/api/auth/me', {
+                headers: { 'Authorization': `Bearer ${storedToken}` }
+            })
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+                if (data) setUser(data);
+                else {
+                    // Token is expired/invalid — clear it
+                    localStorage.removeItem('auth_token');
+                    setToken(null);
+                }
+            })
+            .catch(() => {
+                localStorage.removeItem('auth_token');
+                setToken(null);
+            })
+            .finally(() => setIsLoading(false));
+        } else {
+            setIsLoading(false);
         }
-        setIsLoading(false);
     }, []);
 
     const login = async (username: string, password: string): Promise<boolean> => {
         try {
             const response = await fetch('http://localhost:8000/api/auth/login', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    username,
-                    password,
-                }),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password }),
             });
 
             if (response.ok) {
                 const data = await response.json();
-                // token might come in access_token field or message
-                const tokenValue = data.access_token || data.message;
+                const tokenValue = data.access_token;
                 if (tokenValue) {
                     setToken(tokenValue);
                     localStorage.setItem('auth_token', tokenValue);
-                    // TODO: Decode token to get user info or fetch user profile
+
+                    // ✅ Fetch user profile immediately after login
+                    const meRes = await fetch('http://localhost:8000/api/auth/me', {
+                        headers: { 'Authorization': `Bearer ${tokenValue}` }
+                    });
+                    if (meRes.ok) {
+                        const userData = await meRes.json();
+                        setUser(userData);
+                    }
                     return true;
                 }
-                return false;
             }
             return false;
         } catch (error) {

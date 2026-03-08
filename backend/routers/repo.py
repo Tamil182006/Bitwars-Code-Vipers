@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 from datetime import datetime
 
 from services.code_parser import clone_repo, extract_code_files, chunk_code
-from services.vector_store import build_index
+from services.vector_store import build_index, scroll_all_chunks
 from database import engine
 from models.repository import Repository
 from models.user import User
@@ -168,3 +168,91 @@ def get_ingestion_status(current_user: User = Depends(get_current_user)):
             "total_files": repo.total_files,
             "total_chunks": repo.total_chunks,
         }
+
+
+# ── Route 3: GET /api/repo/health ─────────────────────────────────────
+
+@router.get("/health")
+def get_repo_health(current_user: User = Depends(get_current_user)):
+    """
+    Returns a detailed health dashboard for the current user's indexed repository.
+    Computes: language breakdown, top 5 largest files, total lines, TODO count.
+    """
+    with Session(engine) as session:
+        statement = select(Repository).where(Repository.user_id == current_user.id)
+        repo = session.exec(statement).first()
+        if not repo or repo.status != "ready":
+            raise HTTPException(
+                status_code=400,
+                detail="No ready repository found. Please ingest a repository first."
+            )
+
+    # Fetch all chunks from Qdrant for this repo
+    chunks = scroll_all_chunks(current_user.id, repo.id, limit=500)
+
+    if not chunks:
+        return {
+            "repo_url": repo.repo_url,
+            "total_files": repo.total_files,
+            "total_chunks": repo.total_chunks,
+            "languages": {},
+            "top_files": [],
+            "total_lines": 0,
+            "todo_count": 0,
+        }
+
+    # Compute stats
+    file_sizes: dict = {}    # path -> total lines
+    lang_counts: dict = {}   # extension -> number of chunks
+    total_lines = 0
+    todo_count = 0
+
+    LANG_MAP = {
+        ".py": "Python", ".ts": "TypeScript", ".tsx": "TypeScript",
+        ".js": "JavaScript", ".jsx": "JavaScript", ".java": "Java",
+        ".go": "Go", ".rs": "Rust", ".cpp": "C++", ".c": "C",
+        ".cs": "C#", ".rb": "Ruby", ".php": "PHP", ".swift": "Swift",
+        ".kt": "Kotlin", ".html": "HTML", ".css": "CSS", ".json": "JSON",
+        ".md": "Markdown", ".sh": "Shell",
+    }
+
+    for chunk in chunks:
+        path = chunk.get("path", "unknown")
+        content = chunk.get("content", "")
+        start = chunk.get("start_line", 0)
+        end = chunk.get("end_line", 0)
+        chunk_lines = max(0, end - start)
+
+        # File sizes
+        file_sizes[path] = file_sizes.get(path, 0) + chunk_lines
+        total_lines += chunk_lines
+
+        # Language breakdown
+        ext = "." + path.rsplit(".", 1)[-1].lower() if "." in path else ".unknown"
+        lang = LANG_MAP.get(ext, "Other")
+        lang_counts[lang] = lang_counts.get(lang, 0) + 1
+
+        # TODO/FIXME counter
+        todo_count += content.upper().count("TODO") + content.upper().count("FIXME")
+
+    # Top 5 largest files
+    top_files = sorted(file_sizes.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_files_list = [{"path": p, "lines": l} for p, l in top_files]
+
+    # Language percentages
+    total_lang = sum(lang_counts.values()) or 1
+    languages = {
+        lang: round((count / total_lang) * 100, 1)
+        for lang, count in sorted(lang_counts.items(), key=lambda x: x[1], reverse=True)
+    }
+
+    return {
+        "repo_url": repo.repo_url,
+        "total_files": repo.total_files,
+        "total_chunks": repo.total_chunks,
+        "total_lines": total_lines,
+        "todo_count": todo_count,
+        "languages": languages,
+        "top_files": top_files_list,
+    }
+
