@@ -1,0 +1,8 @@
+/.next/
+/node_modules
+.env*
+!.env.example
+*.pem
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts

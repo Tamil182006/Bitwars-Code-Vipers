@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+gitpython
+sentence-transformers
+qdrant-client
+openai
+requests
+google-generativeai
