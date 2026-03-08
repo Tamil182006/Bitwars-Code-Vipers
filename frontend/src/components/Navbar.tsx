@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Home,
@@ -9,10 +9,12 @@ import {
   AlertTriangle,
   Shield,
   LogOut,
+  LogIn,
   Menu,
   X,
 } from "lucide-react";
 import { useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 
 const navLinks = [
   { href: "/", label: "Home", icon: Home },
@@ -22,11 +24,18 @@ const navLinks = [
 
 export default function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { user, logout, isLoading } = useAuth();
 
   if (pathname === "/login" || pathname === "/signup") {
     return null;
   }
+
+  const handleLogout = () => {
+    logout();
+    router.push('/login');
+  };
 
   return (
     <nav className="navbar-glass fixed top-0 left-0 right-0 z-50">
@@ -58,11 +67,10 @@ export default function Navbar() {
                   <Link
                     key={href}
                     href={href}
-                    className={`flex items-center gap-2 rounded-full px-4 py-1.5 text-sm transition-all duration-300 relative ${
-                      isActive
+                    className={`flex items-center gap-2 rounded-full px-4 py-1.5 text-sm transition-all duration-300 relative ${isActive
                         ? "bg-[#00FFFF]/10 font-medium text-[#00FFFF]"
                         : "text-white/60 hover:text-white"
-                    }`}
+                      }`}
                   >
                     <Icon size={16} />
                     <span>{label}</span>
@@ -82,13 +90,25 @@ export default function Navbar() {
               })}
             </div>
 
-            <Link
-              href="/login"
-              className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium text-white/50 hover:text-red-400 hover:bg-red-400/10 border border-transparent hover:border-red-400/20 transition-all duration-300 group"
-            >
-              <LogOut size={16} className="group-hover:translate-x-0.5 transition-transform" />
-              <span>Logout</span>
-            </Link>
+            {!isLoading && (
+              user ? (
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium text-white/50 hover:text-red-400 hover:bg-red-400/10 border border-transparent hover:border-red-400/20 transition-all duration-300 group"
+                >
+                  <LogOut size={16} className="group-hover:translate-x-0.5 transition-transform" />
+                  <span>Logout</span>
+                </button>
+              ) : (
+                <Link
+                  href="/login"
+                  className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium text-white/50 hover:text-cyan-400 hover:bg-cyan-400/10 border border-transparent hover:border-cyan-400/20 transition-all duration-300 group"
+                >
+                  <LogIn size={16} className="group-hover:translate-x-0.5 transition-transform" />
+                  <span>Login</span>
+                </Link>
+              )
+            )}
           </div>
 
           {/* Mobile menu button */}
@@ -116,25 +136,39 @@ export default function Navbar() {
                 key={href}
                 href={href}
                 onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
-                  isActive
+                className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${isActive
                     ? "text-[#00FFFF] bg-cyan-500/10 border border-cyan-500/20"
                     : "text-white/70 hover:text-[#00FFFF] hover:bg-cyan-500/5"
-                }`}
+                  }`}
               >
                 <Icon size={16} />
                 {label}
               </Link>
             );
           })}
-          <Link
-            href="/login"
-            onClick={() => setMobileOpen(false)}
-            className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-white/50 hover:text-red-400 transition-all"
-          >
-            <LogOut size={16} />
-            Logout
-          </Link>
+          {!isLoading && (
+            user ? (
+              <button
+                onClick={() => {
+                  handleLogout();
+                  setMobileOpen(false);
+                }}
+                className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-white/50 hover:text-red-400 transition-all"
+              >
+                <LogOut size={16} />
+                Logout
+              </button>
+            ) : (
+              <Link
+                href="/login"
+                onClick={() => setMobileOpen(false)}
+                className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-white/50 hover:text-cyan-400 transition-all"
+              >
+                <LogIn size={16} />
+                Login
+              </Link>
+            )
+          )}
         </div>
       </motion.div>
     </nav>

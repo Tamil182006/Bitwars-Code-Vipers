@@ -1,0 +1,30 @@
+Database Implementation Task Plan
+ Step 1: Database Setup
+
+ Add psycopg2 and SQLAlchemy (or SQLModel) to 
+requirements.txt
+.
+ Create database.py to handle the Postgres connection via environment variables (e.g. POSTGRES_URL).
+ Step 2: Schema Definition
+
+ Create models/user.py defining the users table.
+ Create models/repository.py defining the repositories table.
+ Create Alembic migrations (optional but recommended) to manage the schema.
+ Step 3: Update Integration (Vector Store)
+
+ Modify 
+services/vector_store.py
+ to avoid deleting the single global Qdrant collection for every ingestion.
+ Add repo_id and user_id to the Qdrant payload during embedding to enable multi-tenant search.
+ Step 4: Update API & Background Tasks
+
+ Connect the POST /api/repo/ingest and GET /api/repo/status endpoints to use the Postgres repositories table instead of an in-memory dictionary.
+ Refactor the background task 
+run_ingestion
+ to update the DB directly with 
+status
+, total_files, etc.
+ Step 5: User Management Endpoints
+
+ Add routers/auth.py for user registration and login.
+ Integrate JWT authentication to tie repositories to logged-in users.

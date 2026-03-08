@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import SidebarLayout from "@/components/SidebarLayout";
 import { Loader2, TerminalSquare, AlertTriangle, User, Bot, FileCode2, ChevronRight, Bug } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -8,6 +9,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { useAuth } from "@/contexts/AuthContext";
 
 const API = "http://localhost:8000";
 
@@ -31,7 +33,36 @@ export default function ErrorsPage() {
   const [errorInput, setErrorInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  const { token, user, isLoading } = useAuth();
+  const router = useRouter();
+
   const activeSession = sessions.find((s) => s.id === activeId);
+
+  const getHeaders = () => ({
+    "Content-Type": "application/json",
+    ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+  });
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.push('/login');
+    }
+  }, [user, isLoading, router]);
+
+  // Show loading while checking auth
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <Loader2 size={32} className="animate-spin text-cyan-400" />
+      </div>
+    );
+  }
+
+  // Don't render if not authenticated
+  if (!user) {
+    return null;
+  }
 
   // Auto-scroll chat
   useEffect(() => {
@@ -61,7 +92,7 @@ export default function ErrorsPage() {
 
     setSessions((prev) => [newSession, ...prev]);
     setActiveId(newSession.id);
-    
+
     // The user's trace is essentially their first message
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -78,18 +109,18 @@ export default function ErrorsPage() {
         s.id === newSession.id ? { ...s, messages: [userMessage] } : s
       )
     );
-    
+
     const traceToAnalyze = errorInput;
     setErrorInput("");
 
     try {
       const res = await fetch(`${API}/api/debug/analyze`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getHeaders(),
         body: JSON.stringify({ error_text: traceToAnalyze }),
       });
       const data = await res.json();
-      
+
       let aiContent;
       if (!res.ok || data.error) {
         aiContent = <span className="text-red-400 font-mono text-sm">{data.detail || data.error || "Analysis failed"}</span>;
@@ -99,15 +130,15 @@ export default function ErrorsPage() {
             {/* Error Type/Info Header */}
             {data?.error_info && (data.error_info.error_type || data.error_info.error_message) && (
               <div className="border border-red-900/30 bg-red-950/10 rounded-lg p-3">
-                 <div className="flex items-center gap-2 text-red-400 mb-2 pb-2 border-b border-red-900/40">
-                   <AlertTriangle size={14} />
-                   <span className="text-xs font-bold uppercase tracking-wider">Error Successfully Parsed</span>
-                 </div>
-                 <div className="text-red-300 font-bold text-sm mb-1">Type: {data.error_info.error_type || "Unknown Error"}</div>
-                 <div className="font-mono text-xs text-white/60">Message: {data.error_info.error_message || "No specific message extracted"}</div>
-                 {data.error_info.files_mentioned?.length > 0 && (
-                     <div className="font-mono text-xs text-white/50 mt-1">Files found: {data.error_info.files_mentioned.join(", ")}</div>
-                 )}
+                <div className="flex items-center gap-2 text-red-400 mb-2 pb-2 border-b border-red-900/40">
+                  <AlertTriangle size={14} />
+                  <span className="text-xs font-bold uppercase tracking-wider">Error Successfully Parsed</span>
+                </div>
+                <div className="text-red-300 font-bold text-sm mb-1">Type: {data.error_info.error_type || "Unknown Error"}</div>
+                <div className="font-mono text-xs text-white/60">Message: {data.error_info.error_message || "No specific message extracted"}</div>
+                {data.error_info.files_mentioned?.length > 0 && (
+                  <div className="font-mono text-xs text-white/50 mt-1">Files found: {data.error_info.files_mentioned.join(", ")}</div>
+                )}
               </div>
             )}
 
@@ -117,10 +148,10 @@ export default function ErrorsPage() {
                 <AlertTriangle size={15} className="text-yellow-500" /> Root Cause & Solution
               </div>
               <div className="text-sm text-white/80 leading-relaxed font-sans prose prose-invert max-w-none prose-a:text-cyan-400">
-                <ReactMarkdown 
+                <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{
-                    code({node, inline, className, children, ...props}: any) {
+                    code({ node, inline, className, children, ...props }: any) {
                       const match = /language-(\w+)/.exec(className || '')
                       return !inline && match ? (
                         <div className="rounded-md overflow-hidden border border-[#333] my-4">
@@ -159,9 +190,9 @@ export default function ErrorsPage() {
                 <div className="p-2 space-y-1">
                   {data.relevant_files.map((f: any, i: number) => (
                     <div key={i} className="text-xs font-mono text-white/70 px-2 py-1 flex items-center gap-2">
-                       <ChevronRight size={12} className="opacity-50 text-red-400" />
-                       <span className="truncate">{f.path}</span>
-                       <span className="opacity-40 ml-auto flex-shrink-0">L{f.start_line}-{f.end_line}</span>
+                      <ChevronRight size={12} className="opacity-50 text-red-400" />
+                      <span className="truncate">{f.path}</span>
+                      <span className="opacity-40 ml-auto flex-shrink-0">L{f.start_line}-{f.end_line}</span>
                     </div>
                   ))}
                 </div>
@@ -201,7 +232,7 @@ export default function ErrorsPage() {
   };
 
   return (
-    <SidebarLayout 
+    <SidebarLayout
       type="errors"
       activeItemId={activeId}
       historyItems={sessions.map(s => ({ id: s.id, title: s.title, createdAt: s.createdAt }))}
@@ -211,7 +242,7 @@ export default function ErrorsPage() {
       {!activeSession ? (
         // --- NEW SESSION VIEW ---
         <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-12 relative overflow-hidden backdrop-blur-md">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="w-full max-w-2xl text-center space-y-8 relative z-10"
@@ -219,7 +250,7 @@ export default function ErrorsPage() {
             <div className="w-16 h-16 mx-auto rounded-2xl bg-black border border-[#222] flex items-center justify-center text-white/80 shadow-[0_0_40px_rgba(255,255,255,0.03)]">
               <Bug size={32} />
             </div>
-            
+
             <div>
               <h1 className="text-3xl font-medium text-white mb-3 tracking-tight">Debug Error Trace</h1>
               <p className="text-white/40 text-sm">Paste an exact stack trace or error log to instantly diagnose the root cause.</p>
@@ -258,37 +289,35 @@ export default function ErrorsPage() {
           {/* Main Chat Area */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-12">
             <div className="max-w-4xl mx-auto space-y-6">
-              
+
               <div className="text-center py-6 border-b border-[#111] mb-8">
-                 <h2 className="text-lg font-mono text-white/80 flex items-center justify-center gap-2">
-                   <AlertTriangle size={18} className="text-red-500/70" /> {activeSession.title}
-                 </h2>
-                 <p className="text-xs text-white/30 mt-2 font-mono">DevGuardian Debug Session</p>
+                <h2 className="text-lg font-mono text-white/80 flex items-center justify-center gap-2">
+                  <AlertTriangle size={18} className="text-red-500/70" /> {activeSession.title}
+                </h2>
+                <p className="text-xs text-white/30 mt-2 font-mono">DevGuardian Debug Session</p>
               </div>
 
               {/* Chat Messages */}
               {activeSession.messages.map((msg) => (
                 <div key={msg.id} className={`flex gap-4 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-1 ${
-                    msg.role === "user" 
-                      ? "bg-[#222] border border-[#333]" 
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-1 ${msg.role === "user"
+                      ? "bg-[#222] border border-[#333]"
                       : "bg-[#111] border border-[#222]"
-                  }`}>
-                    {msg.role === "user" ? <User size={16} className="text-white/70" /> : 
-                     <Bot size={16} className="text-white/50" />}
+                    }`}>
+                    {msg.role === "user" ? <User size={16} className="text-white/70" /> :
+                      <Bot size={16} className="text-white/50" />}
                   </div>
                   <div className={`flex-1 flex max-w-[85%] ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                    <div className={`${
-                      msg.role === "user" 
-                        ? "bg-[#1f1f1f] border border-[#333] px-4 py-3 rounded-2xl rounded-tr-sm text-sm overflow-x-auto w-full" 
+                    <div className={`${msg.role === "user"
+                        ? "bg-[#1f1f1f] border border-[#333] px-4 py-3 rounded-2xl rounded-tr-sm text-sm overflow-x-auto w-full"
                         : "pt-1 w-full"
-                    }`}>
+                      }`}>
                       {msg.content}
                     </div>
                   </div>
                 </div>
               ))}
-              
+
               {activeSession.status === "analyzing" && (
                 <div className="flex gap-4">
                   <div className="w-8 h-8 rounded-lg bg-[#111] border border-[#222] flex items-center justify-center flex-shrink-0 mt-1">

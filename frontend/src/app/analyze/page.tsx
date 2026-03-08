@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import SidebarLayout from "@/components/SidebarLayout";
 import { Loader2, Github, TerminalSquare, Search, FileCode2, User, Bot, AlertTriangle, ArrowRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -8,6 +9,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { useAuth } from "@/contexts/AuthContext";
 
 const API = "http://localhost:8000";
 
@@ -36,7 +38,36 @@ export default function AnalyzePage() {
   const pollRef = useRef<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  const { token, user, isLoading } = useAuth();
+  const router = useRouter();
+
   const activeSession = sessions.find((s) => s.id === activeId);
+
+  const getHeaders = () => ({
+    "Content-Type": "application/json",
+    ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+  });
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.push('/login');
+    }
+  }, [user, isLoading, router]);
+
+  // Show loading while checking auth
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <Loader2 size={32} className="animate-spin text-cyan-400" />
+      </div>
+    );
+  }
+
+  // Don't render if not authenticated
+  if (!user) {
+    return null;
+  }
 
   // Auto-scroll chat
   useEffect(() => {
@@ -60,13 +91,13 @@ export default function AnalyzePage() {
 
   const handleRename = (id: string, newTitle: string) => {
     if (!newTitle || !newTitle.trim()) return;
-    setSessions((prev) => 
+    setSessions((prev) =>
       prev.map((s) => s.id === id ? { ...s, title: newTitle.trim() } : s)
     );
   };
 
   const handleFetch = (id: string) => {
-    setSessions((prev) => 
+    setSessions((prev) =>
       prev.map((s) => {
         if (s.id !== id) return s;
         // Mock a re-fetch by simply re-adding a system message
@@ -91,7 +122,7 @@ export default function AnalyzePage() {
       } catch (e) {
         urlObj = { pathname: `/${repoInput}` };
       }
-      
+
       const title = urlObj.pathname.slice(1) || repoInput;
       const newSession: RepoSession = {
         id: Date.now().toString(),
@@ -113,24 +144,26 @@ export default function AnalyzePage() {
       // 1) Start Ingestion on Backend
       const res = await fetch(`${API}/api/repo/ingest`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getHeaders(),
         body: JSON.stringify({ repo_url: newSession.repoUrl }),
       });
-      
+
       if (!res.ok) throw new Error("Failed to start ingestion");
 
       // 2) Poll Status
       pollRef.current = setInterval(async () => {
         try {
-          const statusRes = await fetch(`${API}/api/repo/status`);
+          const statusRes = await fetch(`${API}/api/repo/status`, {
+            headers: getHeaders(),
+          });
           const statusData = await statusRes.json();
 
           setSessions((prev) =>
             prev.map((s) => {
               if (s.id !== newSession.id) return s;
-              
+
               const updatedSession = { ...s, ingestData: statusData };
-              
+
               if (statusData.status === "ready") {
                 clearInterval(pollRef.current);
                 const summaryMessage: ChatMessage = {
@@ -153,8 +186,8 @@ export default function AnalyzePage() {
                 };
                 return { ...updatedSession, status: "ready", messages: [summaryMessage] };
               } else if (statusData.status.startsWith("error") || statusData.status === "failed") {
-                 clearInterval(pollRef.current);
-                 return { ...updatedSession, status: "error" };
+                clearInterval(pollRef.current);
+                return { ...updatedSession, status: "error" };
               }
               return updatedSession;
             })
@@ -201,7 +234,7 @@ export default function AnalyzePage() {
       // Call Backend
       const res = await fetch(`${API}${endpoint}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getHeaders(),
         body: JSON.stringify(bodyPayload),
       });
 
@@ -227,17 +260,17 @@ export default function AnalyzePage() {
                   <p><strong className="text-red-300">Type:</strong> {data.error_info.error_type || "Unknown Error"}</p>
                   <p><strong className="text-red-300">Message:</strong> {data.error_info.error_message || "No specific message extracted"}</p>
                   {data.error_info.files_mentioned?.length > 0 && (
-                     <p><strong className="text-red-300">Files:</strong> {data.error_info.files_mentioned.join(", ")}</p>
+                    <p><strong className="text-red-300">Files:</strong> {data.error_info.files_mentioned.join(", ")}</p>
                   )}
                 </div>
               </div>
             )}
-            
+
             <div className="text-sm text-white/90 leading-relaxed font-sans prose prose-invert max-w-none prose-a:text-cyan-400">
-              <ReactMarkdown 
+              <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
-                  code({node, inline, className, children, ...props}: any) {
+                  code({ node, inline, className, children, ...props }: any) {
                     const match = /language-(\w+)/.exec(className || '')
                     return !inline && match ? (
                       <div className="rounded-md overflow-hidden border border-[#333] my-4">
@@ -265,22 +298,22 @@ export default function AnalyzePage() {
                 {aiText || "No response generated."}
               </ReactMarkdown>
             </div>
-            
+
             {relevantFiles.length > 0 && (
               <div className="mt-4 border border-cyan-900/30 bg-black/40 rounded-lg overflow-hidden">
-                 <div className="bg-[#111] px-3 py-2 text-xs font-mono text-white/50 border-b border-cyan-900/30 flex items-center justify-between">
-                   <span>Relevant Context Sources</span>
-                   <span>{relevantFiles.length} matched files</span>
-                 </div>
-                 <div className="p-2 space-y-1">
-                   {relevantFiles.map((file: any, index: number) => (
-                     <div key={index} className="text-xs font-mono text-cyan-500/80 px-2 py-1 flex items-center gap-2">
-                        <ArrowRight size={12} className="opacity-50" />
-                        <span className="truncate">{file.path}</span>
-                        <span className="opacity-40 ml-auto flex-shrink-0">Score: {file.score ? file.score.toFixed(2) : "N/A"}</span>
-                     </div>
-                   ))}
-                 </div>
+                <div className="bg-[#111] px-3 py-2 text-xs font-mono text-white/50 border-b border-cyan-900/30 flex items-center justify-between">
+                  <span>Relevant Context Sources</span>
+                  <span>{relevantFiles.length} matched files</span>
+                </div>
+                <div className="p-2 space-y-1">
+                  {relevantFiles.map((file: any, index: number) => (
+                    <div key={index} className="text-xs font-mono text-cyan-500/80 px-2 py-1 flex items-center gap-2">
+                      <ArrowRight size={12} className="opacity-50" />
+                      <span className="truncate">{file.path}</span>
+                      <span className="opacity-40 ml-auto flex-shrink-0">Score: {file.score ? file.score.toFixed(2) : "N/A"}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -310,7 +343,7 @@ export default function AnalyzePage() {
   };
 
   return (
-    <SidebarLayout 
+    <SidebarLayout
       type="analyze"
       activeItemId={activeId}
       historyItems={sessions.map(s => ({ id: s.id, title: s.title, createdAt: s.createdAt }))}
@@ -323,7 +356,7 @@ export default function AnalyzePage() {
       {!activeSession ? (
         // --- NEW SESSION VIEW ---
         <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-12 relative overflow-hidden backdrop-blur-md">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="w-full max-w-2xl text-center space-y-8 relative z-10"
@@ -331,7 +364,7 @@ export default function AnalyzePage() {
             <div className="w-16 h-16 mx-auto rounded-2xl bg-black border border-[#222] flex items-center justify-center text-white/80 shadow-[0_0_40px_rgba(255,255,255,0.03)]">
               <TerminalSquare size={32} />
             </div>
-            
+
             <div>
               <h1 className="text-3xl font-medium text-white mb-3 tracking-tight">Analyze Codebase</h1>
               <p className="text-white/40 text-sm">Paste a GitHub repository URL to index it and start asking questions.</p>
@@ -366,12 +399,16 @@ export default function AnalyzePage() {
           {/* Main Chat Area */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-6">
             <div className="max-w-3xl mx-auto space-y-6">
-              
+
               <div className="text-center py-6 border-b border-[#111] mb-8 relative flex flex-col items-center">
-                 <h2 className="text-lg font-mono text-white/80 flex items-center justify-center gap-2">
-                   <Github size={18} /> {activeSession.title}
-                 </h2>
-                 <p className="text-xs text-white/30 mt-2 font-mono">{activeSession.repoUrl}</p>
+                <h2 className="text-lg font-mono text-white/80 flex items-center justify-center gap-2">
+                  <Github size={18} /> {activeSession.title}
+                </h2>
+                <p className="text-xs text-white/30 mt-2 font-mono">
+                  <a href={activeSession.repoUrl} target="_blank" rel="noopener noreferrer" className="underline hover:text-[#00FFFF]">
+                    {activeSession.repoUrl}
+                  </a>
+                </p>
               </div>
 
               {/* Ingestion Status Loading Block (if not ready) */}
@@ -389,7 +426,7 @@ export default function AnalyzePage() {
                       <div className="text-white/40 space-y-1">
                         <p>[{activeSession.ingestData?.status || "starting"}] {activeSession.ingestData?.message || "Preparing..."}</p>
                         {activeSession.ingestData?.total_chunks > 0 && (
-                           <p className="text-cyan-600/50">Processing {activeSession.ingestData.total_chunks} chunk(s) across {activeSession.ingestData.total_files} file(s)...</p>
+                          <p className="text-cyan-600/50">Processing {activeSession.ingestData.total_chunks} chunk(s) across {activeSession.ingestData.total_files} file(s)...</p>
                         )}
                       </div>
                     </div>
@@ -400,29 +437,27 @@ export default function AnalyzePage() {
               {/* Chat Messages */}
               {activeSession.messages.map((msg) => (
                 <div key={msg.id} className={`flex gap-4 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                    msg.role === "user" 
-                      ? "bg-[#222] border border-[#333]" 
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${msg.role === "user"
+                      ? "bg-[#222] border border-[#333]"
                       : msg.role === "system"
                         ? "bg-[#111] border border-[#222]"
                         : "bg-cyan-950/30 border border-cyan-900/40"
-                  }`}>
-                    {msg.role === "user" ? <User size={16} className="text-white/70" /> : 
-                     msg.role === "system" ? <TerminalSquare size={16} className="text-white/50" /> : 
-                     <Bot size={16} className="text-cyan-500" />}
+                    }`}>
+                    {msg.role === "user" ? <User size={16} className="text-white/70" /> :
+                      msg.role === "system" ? <TerminalSquare size={16} className="text-white/50" /> :
+                        <Bot size={16} className="text-cyan-500" />}
                   </div>
                   <div className={`flex-1 flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[85%] ${
-                      msg.role === "user" 
-                        ? "bg-[#1f1f1f] text-white/90 px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm" 
+                    <div className={`max-w-[85%] ${msg.role === "user"
+                        ? "bg-[#1f1f1f] text-white/90 px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm"
                         : "pt-1"
-                    }`}>
+                      }`}>
                       {msg.content}
                     </div>
                   </div>
                 </div>
               ))}
-              
+
               {isQuerying && (
                 <div className="flex gap-4">
                   <div className="w-8 h-8 rounded-lg bg-cyan-950/30 border border-cyan-900/40 flex items-center justify-center flex-shrink-0">

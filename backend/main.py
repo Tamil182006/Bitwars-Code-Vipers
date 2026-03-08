@@ -1,17 +1,27 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
-from routers import repo, debug
+from routers import repo, debug, auth
+from database import create_db_and_tables
 
 # Load environment variables from .env file
 load_dotenv()
+
+# ── Lifespan event to create DB on startup ─────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Create database tables on startup
+    create_db_and_tables()
+    yield
 
 # ── Create the FastAPI app ─────────────────────────────────────────────
 app = FastAPI(
     title="DevGuardian API",
     description="AI-powered codebase understanding and error diagnosis",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # ── CORS Middleware ────────────────────────────────────────────────────
@@ -25,6 +35,7 @@ app.add_middleware(
 )
 
 # ── Register Routers ───────────────────────────────────────────────────
+app.include_router(auth.router, prefix="/api", tags=["Auth"])
 app.include_router(repo.router,  prefix="/api/repo",  tags=["Repository"])
 app.include_router(debug.router, prefix="/api/debug", tags=["Debug"])
 

@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Mail, Lock, Eye, EyeOff, User, Loader2, AlertCircle, CheckCircle } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 function validateEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -14,6 +16,7 @@ interface FormErrors {
   email?: string;
   password?: string;
   confirmPassword?: string;
+  general?: string;
 }
 
 export default function SignupForm() {
@@ -28,6 +31,9 @@ export default function SignupForm() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [isLoading, setIsLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+
+  const { signup } = useAuth();
+  const router = useRouter();
 
   const update = (field: keyof typeof form, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -55,9 +61,22 @@ export default function SignupForm() {
     }
     setErrors({});
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 1500));
-    setIsLoading(false);
-    setSuccess(true);
+
+    try {
+      const success = await signup(form.name, form.email, form.password);
+      if (success) {
+        setSuccess(true);
+        setTimeout(() => {
+          router.push('/login');
+        }, 1000);
+      } else {
+        setErrors({ general: "Registration failed. Email may already be in use." });
+      }
+    } catch (error) {
+      setErrors({ general: "An error occurred. Please try again." });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const passwordStrength = () => {
@@ -147,11 +166,10 @@ export default function SignupForm() {
                   value={form[key]}
                   onChange={(e) => update(key, e.target.value)}
                   placeholder={placeholder}
-                  className={`w-full rounded-md border bg-black/40 py-2 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 transition-all ${
-                    errors[key]
-                      ? "border-red-500 focus:border-red-500 focus:ring-red-500/20"
-                      : "border-cyan-500/20 focus:border-cyan-400/40 focus:ring-cyan-500/20"
-                  }`}
+                  className={`w-full rounded-md border bg-black/40 py-2 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 transition-all ${errors[key]
+                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/20"
+                    : "border-cyan-500/20 focus:border-cyan-400/40 focus:ring-cyan-500/20"
+                    }`}
                 />
               </div>
               {key === "name" && !errors.name && (
@@ -187,11 +205,10 @@ export default function SignupForm() {
                 value={form.password}
                 onChange={(e) => update("password", e.target.value)}
                 placeholder="Enter password"
-                className={`w-full rounded-md border bg-black/40 py-2 pl-10 pr-10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 transition-all ${
-                  errors.password
-                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/20"
-                    : "border-cyan-500/20 focus:border-cyan-400/40 focus:ring-cyan-500/20"
-                }`}
+                className={`w-full rounded-md border bg-black/40 py-2 pl-10 pr-10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 transition-all ${errors.password
+                  ? "border-red-500 focus:border-red-500 focus:ring-red-500/20"
+                  : "border-cyan-500/20 focus:border-cyan-400/40 focus:ring-cyan-500/20"
+                  }`}
               />
               <button
                 type="button"
@@ -247,11 +264,10 @@ export default function SignupForm() {
                 value={form.confirmPassword}
                 onChange={(e) => update("confirmPassword", e.target.value)}
                 placeholder="Re-enter password"
-                className={`w-full rounded-md border bg-black/40 py-2 pl-10 pr-10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 transition-all ${
-                  errors.confirmPassword
-                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/20"
-                    : "border-cyan-500/20 focus:border-cyan-400/40 focus:ring-cyan-500/20"
-                }`}
+                className={`w-full rounded-md border bg-black/40 py-2 pl-10 pr-10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 transition-all ${errors.confirmPassword
+                  ? "border-red-500 focus:border-red-500 focus:ring-red-500/20"
+                  : "border-cyan-500/20 focus:border-cyan-400/40 focus:ring-cyan-500/20"
+                  }`}
               />
               <button
                 type="button"

@@ -1,9 +1,14 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from sqlmodel import Session, select
 
 from services.error_parser import parse_stack_trace
-from services.vector_store import search, index_exists
+from services.vector_store import search
 from services.llm_engine import explain_error, answer_query
+from database import engine
+from models.repository import Repository
+from models.user import User
+from routers.auth import get_current_user
 
 router = APIRouter()
 
@@ -38,34 +43,35 @@ def format_chunks(chunks: list) -> list:
 # ── Route 1: POST /api/debug/analyze ──────────────────────────────────
 
 @router.post("/analyze")
-def analyze_error(request: ErrorRequest):
+def analyze_error(request: ErrorRequest, current_user: User = Depends(get_current_user)):
     """
     Accepts a raw error message or stack trace.
 
     Flow:
-      1. Checks if a repository has been indexed (Qdrant must have data)
+      1. Checks if a repository has been indexed for the user
       2. Parses the error using error_parser → extracts type, files, functions
       3. Builds a smart search query from the parsed info
       4. Searches Qdrant for the top 5 most relevant code chunks
-      5. Returns parsed error info + relevant code chunks + AI explanation (TBD)
+      5. Returns parsed error info + relevant code chunks + AI explanation
     """
-
-    # Step 1 — Make sure a repo has been indexed first
-    if not index_exists():
-        raise HTTPException(
-            status_code=400,
-            detail="No repository indexed yet. Please ingest a repository first."
-        )
+    with Session(engine) as session:
+        # Check if user has a repository
+        statement = select(Repository).where(Repository.user_id == current_user.id)
+        repo = session.exec(statement).first()
+        if not repo or repo.status != "ready":
+            raise HTTPException(
+                status_code=400,
+                detail="No repository indexed yet. Please ingest a repository first."
+            )
 
     try:
         # Step 2 — Parse the raw error text
         error_info = parse_stack_trace(request.error_text)
 
         # Step 3 — Search Qdrant with the smart query built by error_parser
-        relevant_chunks = search(error_info["search_query"], top_k=5)
+        relevant_chunks = search(error_info["search_query"], current_user.id, repo.id, top_k=5)
 
         # Step 4 — Return everything
-        # NOTE: "explanation" is a placeholder until LLM is added
         return {
             "error_info": {
                 "error_type":          error_info.get("error_type"),
@@ -85,29 +91,30 @@ def analyze_error(request: ErrorRequest):
 # ── Route 2: POST /api/debug/query ────────────────────────────────────
 
 @router.post("/query")
-def query_codebase(request: QueryRequest):
+def query_codebase(request: QueryRequest, current_user: User = Depends(get_current_user)):
     """
     Accepts a natural language question about the codebase.
 
     Flow:
-      1. Checks if a repository has been indexed
+      1. Checks if a repository has been indexed for the user
       2. Searches Qdrant for the top 5 most relevant code chunks
-      3. Returns matched code chunks + AI answer (TBD)
+      3. Returns matched code chunks + AI answer
     """
-
-    # Step 1 — Make sure a repo has been indexed first
-    if not index_exists():
-        raise HTTPException(
-            status_code=400,
-            detail="No repository indexed yet. Please ingest a repository first."
-        )
+    with Session(engine) as session:
+        # Check if user has a repository
+        statement = select(Repository).where(Repository.user_id == current_user.id)
+        repo = session.exec(statement).first()
+        if not repo or repo.status != "ready":
+            raise HTTPException(
+                status_code=400,
+                detail="No repository indexed yet. Please ingest a repository first."
+            )
 
     try:
         # Step 2 — Search Qdrant directly with the natural language query
-        relevant_chunks = search(request.query, top_k=5)
+        relevant_chunks = search(request.query, current_user.id, repo.id, top_k=5)
 
         # Step 3 — Return results
-        # NOTE: "answer" is a placeholder until LLM is added
         return {
             "query":          request.query,
             "relevant_files": format_chunks(relevant_chunks),

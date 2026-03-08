@@ -3,25 +3,29 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Mail, Lock, Eye, EyeOff, Loader2, AlertCircle, CheckSquare, Square } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 function validateEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 export default function LoginForm() {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  const [errors, setErrors] = useState<{ email?: string; password?: string; general?: string }>({});
+  const [errors, setErrors] = useState<{ username?: string; password?: string; general?: string }>({});
   const [isLoading, setIsLoading] = useState(false);
   const [success, setSuccess] = useState(false);
 
+  const { login } = useAuth();
+  const router = useRouter();
+
   const validate = () => {
     const newErrors: typeof errors = {};
-    if (!email) newErrors.email = "Email is required";
-    else if (!validateEmail(email)) newErrors.email = "Enter a valid email address";
+    if (!username) newErrors.username = "Username is required";
     if (!password) newErrors.password = "Password is required";
     else if (password.length < 6) newErrors.password = "Password must be at least 6 characters";
     return newErrors;
@@ -36,9 +40,22 @@ export default function LoginForm() {
     }
     setErrors({});
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 1500));
-    setIsLoading(false);
-    setSuccess(true);
+
+    try {
+      const success = await login(username, password);
+      if (success) {
+        setSuccess(true);
+        setTimeout(() => {
+          router.push('/');
+        }, 1000);
+      } else {
+        setErrors({ general: "Invalid username or password" });
+      }
+    } catch (error) {
+      setErrors({ general: "An error occurred. Please try again." });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -112,10 +129,10 @@ export default function LoginForm() {
         </AnimatePresence>
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Email */}
+          {/* Username */}
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="email" className="text-sm font-medium text-white/80">
-              Email
+            <label htmlFor="username" className="text-sm font-medium text-white/80">
+              Username
             </label>
             <div className="relative">
               <Mail
@@ -123,30 +140,29 @@ export default function LoginForm() {
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30"
               />
               <input
-                id="email"
+                id="username"
                 type="text"
-                value={email}
+                value={username}
                 onChange={(e) => {
-                  setEmail(e.target.value);
-                  if (errors.email) setErrors((prev) => ({ ...prev, email: undefined }));
+                  setUsername(e.target.value);
+                  if (errors.username) setErrors((prev) => ({ ...prev, username: undefined }));
                 }}
-                placeholder="you@example.com"
-                className={`w-full rounded-md border bg-black/40 py-2 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 transition-all ${
-                  errors.email
-                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/20"
-                    : "border-cyan-500/20 focus:border-cyan-400/40 focus:ring-cyan-500/20"
-                }`}
+                placeholder="Enter your username"
+                className={`w-full rounded-md border bg-black/40 py-2 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 transition-all ${errors.username
+                  ? "border-red-500 focus:border-red-500 focus:ring-red-500/20"
+                  : "border-cyan-500/20 focus:border-cyan-400/40 focus:ring-cyan-500/20"
+                  }`}
               />
             </div>
             <AnimatePresence>
-              {errors.email && (
+              {errors.username && (
                 <motion.p
                   initial={{ opacity: 0, y: -5 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0 }}
                   className="text-red-400 text-xs flex items-center gap-1"
                 >
-                  <AlertCircle size={12} /> {errors.email}
+                  <AlertCircle size={12} /> {errors.username}
                 </motion.p>
               )}
             </AnimatePresence>
@@ -171,11 +187,10 @@ export default function LoginForm() {
                   if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
                 }}
                 placeholder="Enter password"
-                className={`w-full rounded-md border bg-black/40 py-2 pl-10 pr-10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 transition-all ${
-                  errors.password
-                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/20"
-                    : "border-cyan-500/20 focus:border-cyan-400/40 focus:ring-cyan-500/20"
-                }`}
+                className={`w-full rounded-md border bg-black/40 py-2 pl-10 pr-10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 transition-all ${errors.password
+                  ? "border-red-500 focus:border-red-500 focus:ring-red-500/20"
+                  : "border-cyan-500/20 focus:border-cyan-400/40 focus:ring-cyan-500/20"
+                  }`}
               />
               <button
                 type="button"
@@ -236,7 +251,7 @@ export default function LoginForm() {
 
         {/* Footer */}
         <p className="text-center text-white/40 text-sm mt-6">
-          Don&apos;t have an account?{" "}
+          Don't have an account?{" "}
           <Link
             href="/signup"
             className="text-[#00FFFF] hover:underline font-medium"
